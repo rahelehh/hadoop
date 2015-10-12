@@ -18,27 +18,31 @@
 
 package org.apache.hadoop.yarn.server.nodemanager;
 
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.Collections;
 import java.util.Set;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.service.ServiceOperations;
+import org.apache.hadoop.yarn.api.records.NodeLabel;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.event.Dispatcher;
 import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.factories.RecordFactory;
 import org.apache.hadoop.yarn.factory.providers.RecordFactoryProvider;
+import org.apache.hadoop.yarn.nodelabels.CommonNodeLabelsManager;
 import org.apache.hadoop.yarn.nodelabels.NodeLabelTestBase;
 import org.apache.hadoop.yarn.server.api.ResourceTracker;
 import org.apache.hadoop.yarn.server.api.protocolrecords.NodeHeartbeatRequest;
 import org.apache.hadoop.yarn.server.api.protocolrecords.NodeHeartbeatResponse;
 import org.apache.hadoop.yarn.server.api.protocolrecords.RegisterNodeManagerRequest;
 import org.apache.hadoop.yarn.server.api.protocolrecords.RegisterNodeManagerResponse;
+import org.apache.hadoop.yarn.server.api.protocolrecords.UnRegisterNodeManagerRequest;
+import org.apache.hadoop.yarn.server.api.protocolrecords.UnRegisterNodeManagerResponse;
 import org.apache.hadoop.yarn.server.api.records.MasterKey;
 import org.apache.hadoop.yarn.server.api.records.NodeAction;
 import org.apache.hadoop.yarn.server.api.records.NodeStatus;
@@ -71,7 +75,7 @@ public class TestNodeStatusUpdaterForLabels extends NodeLabelTestBase {
 
   private class ResourceTrackerForLabels implements ResourceTracker {
     int heartbeatID = 0;
-    Set<String> labels;
+    Set<NodeLabel> labels;
 
     private boolean receivedNMHeartbeat = false;
     private boolean receivedNMRegister = false;
@@ -105,7 +109,7 @@ public class TestNodeStatusUpdaterForLabels extends NodeLabelTestBase {
       if (receivedNMHeartbeat) {
         return;
       }
-      int i = 500;
+      int i = 10;
       while (!receivedNMHeartbeat && i > 0) {
         synchronized (ResourceTrackerForLabels.class) {
           if (!receivedNMHeartbeat) {
@@ -180,23 +184,28 @@ public class TestNodeStatusUpdaterForLabels extends NodeLabelTestBase {
       }
       return nhResponse;
     }
+
+    @Override
+    public UnRegisterNodeManagerResponse unRegisterNodeManager(
+        UnRegisterNodeManagerRequest request) throws YarnException, IOException {
+      return null;
+    }
   }
 
   public static class DummyNodeLabelsProvider extends NodeLabelsProvider {
 
-    @SuppressWarnings("unchecked")
-    private Set<String> nodeLabels = Collections.EMPTY_SET;
+    private Set<NodeLabel> nodeLabels = CommonNodeLabelsManager.EMPTY_NODELABEL_SET;
 
     public DummyNodeLabelsProvider() {
       super(DummyNodeLabelsProvider.class.getName());
     }
 
     @Override
-    public synchronized Set<String> getNodeLabels() {
+    public synchronized Set<NodeLabel> getNodeLabels() {
       return nodeLabels;
     }
 
-    synchronized void setNodeLabels(Set<String> nodeLabels) {
+    synchronized void setNodeLabels(Set<NodeLabel> nodeLabels) {
       this.nodeLabels = nodeLabels;
     }
   }
@@ -215,8 +224,8 @@ public class TestNodeStatusUpdaterForLabels extends NodeLabelTestBase {
         new ResourceTrackerForLabels();
     nm = new NodeManager() {
       @Override
-      protected NodeLabelsProvider createNodeLabelsProvider(
-          Configuration conf) throws IOException {
+      protected NodeLabelsProvider createNodeLabelsProvider(Configuration conf)
+          throws IOException {
         return dummyLabelsProviderRef;
       }
 
@@ -241,23 +250,25 @@ public class TestNodeStatusUpdaterForLabels extends NodeLabelTestBase {
     };
 
     YarnConfiguration conf = createNMConfigForDistributeNodeLabels();
+    conf.setLong(YarnConfiguration.NM_NODE_LABELS_RESYNC_INTERVAL, 2000);
     nm.init(conf);
     resourceTracker.resetNMHeartbeatReceiveFlag();
     nm.start();
     resourceTracker.waitTillRegister();
-    assertCollectionEquals(resourceTracker.labels,
+    assertNLCollectionEquals(resourceTracker.labels,
         dummyLabelsProviderRef.getNodeLabels());
 
     resourceTracker.waitTillHeartbeat();// wait till the first heartbeat
     resourceTracker.resetNMHeartbeatReceiveFlag();
 
     // heartbeat with updated labels
-    dummyLabelsProviderRef.setNodeLabels(toSet("P"));
+    dummyLabelsProviderRef.setNodeLabels(toNodeLabelSet("P"));
 
     nm.getNodeStatusUpdater().sendOutofBandHeartBeat();
     resourceTracker.waitTillHeartbeat();
-    assertCollectionEquals(resourceTracker.labels,
-        dummyLabelsProviderRef.getNodeLabels());
+    assertNLCollectionEquals(resourceTracker.labels,
+        dummyLabelsProviderRef
+            .getNodeLabels());
     resourceTracker.resetNMHeartbeatReceiveFlag();
 
     // heartbeat without updating labels
@@ -267,15 +278,98 @@ public class TestNodeStatusUpdaterForLabels extends NodeLabelTestBase {
     assertNull(
         "If no change in labels then null should be sent as part of request",
         resourceTracker.labels);
-    
+
     // provider return with null labels
-    dummyLabelsProviderRef.setNodeLabels(null);    
+    dummyLabelsProviderRef.setNodeLabels(null);
     nm.getNodeStatusUpdater().sendOutofBandHeartBeat();
     resourceTracker.waitTillHeartbeat();
+    assertNotNull(
+        "If provider sends null then empty label set should be sent and not null",
+        resourceTracker.labels);
     assertTrue("If provider sends null then empty labels should be sent",
         resourceTracker.labels.isEmpty());
     resourceTracker.resetNMHeartbeatReceiveFlag();
-
+    // Since the resync interval is set to 2 sec in every alternate heartbeat
+    // the labels will be send along with heartbeat.In loop we sleep for 1 sec
+    // so that every sec 1 heartbeat is send.
+    int nullLabels = 0;
+    int nonNullLabels = 0;
+    dummyLabelsProviderRef.setNodeLabels(toNodeLabelSet("P1"));
+    for (int i = 0; i < 5; i++) {
+      nm.getNodeStatusUpdater().sendOutofBandHeartBeat();
+      resourceTracker.waitTillHeartbeat();
+      if (null == resourceTracker.labels) {
+        nullLabels++;
+      } else {
+        Assert.assertEquals("In heartbeat PI labels should be send",
+            toNodeLabelSet("P1"), resourceTracker.labels);
+        nonNullLabels++;
+      }
+      resourceTracker.resetNMHeartbeatReceiveFlag();
+      Thread.sleep(1000);
+    }
+    Assert.assertTrue("More than one heartbeat with empty labels expected",
+        nullLabels > 1);
+    Assert.assertTrue("More than one heartbeat with labels expected",
+        nonNullLabels > 1);
     nm.stop();
+  }
+
+  @Test
+  public void testInvalidNodeLabelsFromProvider() throws InterruptedException,
+      IOException {
+    final ResourceTrackerForLabels resourceTracker =
+        new ResourceTrackerForLabels();
+    nm = new NodeManager() {
+      @Override
+      protected NodeLabelsProvider createNodeLabelsProvider(Configuration conf)
+          throws IOException {
+        return dummyLabelsProviderRef;
+      }
+
+      @Override
+      protected NodeStatusUpdater createNodeStatusUpdater(Context context,
+          Dispatcher dispatcher, NodeHealthCheckerService healthChecker,
+          NodeLabelsProvider labelsProvider) {
+
+        return new NodeStatusUpdaterImpl(context, dispatcher, healthChecker,
+            metrics, labelsProvider) {
+          @Override
+          protected ResourceTracker getRMClient() {
+            return resourceTracker;
+          }
+
+          @Override
+          protected void stopRMProxy() {
+            return;
+          }
+        };
+      }
+    };
+    dummyLabelsProviderRef.setNodeLabels(toNodeLabelSet("P"));
+    YarnConfiguration conf = createNMConfigForDistributeNodeLabels();
+    nm.init(conf);
+    resourceTracker.resetNMHeartbeatReceiveFlag();
+    nm.start();
+    resourceTracker.waitTillHeartbeat();// wait till the first heartbeat
+    resourceTracker.resetNMHeartbeatReceiveFlag();
+
+    // heartbeat with invalid labels
+    dummyLabelsProviderRef.setNodeLabels(toNodeLabelSet("_.P"));
+
+    nm.getNodeStatusUpdater().sendOutofBandHeartBeat();
+    resourceTracker.waitTillHeartbeat();
+    assertNull("On Invalid Labels we need to retain earlier labels, HB "
+        + "needs to send null", resourceTracker.labels);
+    resourceTracker.resetNMHeartbeatReceiveFlag();
+
+    // on next heartbeat same invalid labels will be given by the provider, but
+    // again label validation check and reset RM with empty labels set should
+    // not happen
+    nm.getNodeStatusUpdater().sendOutofBandHeartBeat();
+    resourceTracker.waitTillHeartbeat();
+    resourceTracker.resetNMHeartbeatReceiveFlag();
+    assertNull("NodeStatusUpdater need not send repeatedly empty labels on "
+        + "invalid labels from provider ", resourceTracker.labels);
   }
 }

@@ -91,17 +91,28 @@
   </description>
 </property>
 
-<property>
-  <name>mapreduce.job.reducer.preempt.delay.sec</name>
-  <value>0</value>
-  <description>The threshold in terms of seconds after which an unsatisfied mapper 
-  request triggers reducer preemption to free space. Default 0 implies that the 
-  reduces should be preempted immediately after allocation if there is currently no
-  room for newly allocated mappers.
-  </description>
-</property>
+  <property>
+    <name>mapreduce.job.reducer.preempt.delay.sec</name>
+    <value>0</value>
+    <description>The threshold (in seconds) after which an unsatisfied
+      mapper request triggers reducer preemption when there is no anticipated
+      headroom. If set to 0 or a negative value, the reducer is preempted as
+      soon as lack of headroom is detected. Default is 0.
+    </description>
+  </property>
 
-<property>
+  <property>
+    <name>mapreduce.job.reducer.unconditional-preempt.delay.sec</name>
+    <value>300</value>
+    <description>The threshold (in seconds) after which an unsatisfied
+      mapper request triggers a forced reducer preemption irrespective of the
+      anticipated headroom. By default, it is set to 5 mins. Setting it to 0
+      leads to immediate reducer preemption. Setting to -1 disables this
+      preemption altogether.
+    </description>
+  </property>
+
+  <property>
     <name>mapreduce.job.max.split.locations</name>
     <value>10</value>
     <description>The max number of block locations to store for each split for 
@@ -1113,6 +1124,41 @@
 <!-- MR YARN Application properties -->
 
 <property>
+ <name>mapreduce.job.node-label-expression</name>
+  <description>All the containers of the Map Reduce job will be run with this
+  node label expression. If the node-label-expression for job is not set, then
+  it will use queue's default-node-label-expression for all job's containers.
+  </description>
+</property>
+
+<property>
+  <name>mapreduce.job.am.node-label-expression</name>
+  <description>This is node-label configuration for Map Reduce Application Master
+  container. If not configured it will make use of
+  mapreduce.job.node-label-expression and if job's node-label expression is not
+  configured then it will use queue's default-node-label-expression.
+  </description>
+</property>
+
+<property>
+ <name>mapreduce.map.node-label-expression</name>
+  <description>This is node-label configuration for Map task containers. If not
+  configured it will use mapreduce.job.node-label-expression and if job's
+  node-label expression is not configured then it will use queue's
+  default-node-label-expression.
+  </description>
+</property>
+
+<property>
+  <name>mapreduce.reduce.node-label-expression</name>
+  <description>This is node-label configuration for Reduce task containers. If
+  not configured it will use mapreduce.job.node-label-expression and if job's
+  node-label expression is not configured then it will use queue's
+  default-node-label-expression.
+  </description>
+</property>
+
+<property>
  <name>mapreduce.job.counters.limit</name>
   <value>120</value>
   <description>Limit on the number of user counters allowed per job.
@@ -1288,10 +1334,10 @@
 
 <property>
   <name>mapreduce.fileoutputcommitter.algorithm.version</name>
-  <value>1</value>
+  <value>2</value>
   <description>The file output committer algorithm version
   valid algorithm version number: 1 or 2
-  default to 1, which is the original algorithm
+  default to 2, which is the original algorithm
 
   In algorithm version 1,
 
@@ -1671,6 +1717,23 @@
 </property>
 
 <property>
+  <name>mapreduce.jobhistory.jobname.limit</name>
+  <value>50</value>
+  <description>
+     Number of characters allowed for job name in Job History Server web page.
+  </description>
+</property>
+
+<property>
+  <description>
+  File format the AM will use when generating the .jhist file.  Valid
+  values are "json" for text output and "binary" for faster parsing.
+  </description>
+  <name>mapreduce.jobhistory.jhist.format</name>
+  <value>json</value>
+</property>
+
+<property>
   <name>mapreduce.job.heap.memory-mb.ratio</name>
   <value>0.8</value>
   <description>The ratio of heap-size to container-size. If no -Xmx is
@@ -1706,6 +1769,26 @@
   <description>The interval in milliseconds between which the MR framework
   checks if task attempts stay in finishing state for too long.
   </description>
+</property>
+
+<property>
+  <name>mapreduce.job.encrypted-intermediate-data</name>
+  <value>false</value>
+  <description>Encrypt intermediate MapReduce spill files or not
+  default is false</description>
+</property>
+
+<property>
+  <name>mapreduce.job.encrypted-intermediate-data-key-size-bits</name>
+  <value>128</value>
+  <description>Mapreduce encrypt data key size default is 128</description>
+</property>
+
+<property>
+  <name>mapreduce.job.encrypted-intermediate-data.buffer.kb</name>
+  <value>128</value>
+  <description>Buffer size for intermediate encrypt data in kb
+  default is 128</description>
 </property>
 
 </configuration>

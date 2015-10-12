@@ -183,6 +183,7 @@ selected if this policy is either of `HTTPS_ONLY` or `HTTP_AND_HTTPS`.
 | `yarn.timeline-service.handler-thread-count` | Handler thread count to serve the client RPC requests. Defaults to `10`. |
 | `yarn.timeline-service.client.max-retries` | The maximum number of retries for attempts to publish data to the timeline service.Defaults to `30`. |
 | `yarn.timeline-service.client.retry-interval-ms` | The interval in milliseconds between retries for the timeline service client. Defaults to `1000`. |
+| `yarn.timeline-service.generic-application-history.max-applications` | The max number of applications could be fetched by using REST API or application history protocol and shown in timeline server web ui. Defaults to `10000`. |
 
 
 
@@ -358,9 +359,17 @@ Here is a non-normative description of the API.
 
     GET /ws/v1/timeline/
 
-Returns a JSON object describing the server instance.
+Returns a JSON object describing the server instance and version information.
 
-     {"About":"Timeline API"}
+     {
+       About: "Timeline API",
+       timeline-service-version: "3.0.0-SNAPSHOT",
+       timeline-service-build-version: "3.0.0-SNAPSHOT from fcd0702c10ce574b887280476aba63d6682d5271 by zshen source checksum e9ec74ea3ff7bc9f3d35e9cac694fb",
+       timeline-service-version-built-on: "2015-05-13T19:45Z",
+       hadoop-version: "3.0.0-SNAPSHOT",
+       hadoop-build-version: "3.0.0-SNAPSHOT from fcd0702c10ce574b887280476aba63d6682d5271 by zshen source checksum 95874b192923b43cdb96a6e483afd60",
+       hadoop-version-built-on: "2015-05-13T19:44Z"
+     }
 
 
 ## <a name="REST_API_DOMAINS"></a>Domains `/ws/v1/timeline/domain`
@@ -639,11 +648,20 @@ Use the following URI to obtain all the entity objects of a given
   the set of fields contains `LAST_EVENT_ONLY` and not `EVENTS`, the most recent
   event for each entity is retrieved. If null, retrieves all fields.
 
+Note that the value of the key/value pair for `primaryFilter` and
+`secondaryFilters` parameters can be of different data types, and matching is
+data type sensitive. Users need to format the value properly. For example, `123`
+and `"123"` means an integer and a string respectively. If the entity has a
+string `"123"` for `primaryFilter`, but the parameter is set to the integer
+`123`, the entity will not be matched. Similarly, `true` means a boolean while
+`"true"` means a string. In general, the value will be casted as a certain Java
+type in consistent with `jackson` library parsing a JSON clip.
+
 ### Elements of the `entities` (Timeline Entity List) Object
 
 When you make a request for the list of timeline entities, the information
 will be returned as a collection of container objects. See also
-{{Timeline Entity}} for syntax of the timeline entity object.
+`Timeline Entity` for syntax of the timeline entity object.
 
 | Item | Data Type | Description|
 |:---- |:---- |:---- |
@@ -742,7 +760,9 @@ Use the following URI to obtain the entity object identified by the
 
 ### Elements of the `entity` (Timeline Entity) Object:
 
-See also {{Timeline Event List}} for syntax of the timeline event object.
+See also `Timeline Event List` for syntax of the timeline event object. Note
+that `value` of `primaryfilters` and `otherinfo` is an Object instead of a
+String.
 
 
 | Item | Data Type | Description|
@@ -832,7 +852,8 @@ will be returned as a collection of event objects.
 |:---- |:---- |:---- |
 | `events` | array of timeline event objects(JSON) | The collection of timeline event objects |
 
-Below is the elements of a single event object.
+Below is the elements of a single event object.  Note that `value` of
+`eventinfo` and `otherinfo` is an Object instead of a String.
 
 
 | Item | Data Type | Description|
@@ -888,6 +909,92 @@ Response Body:
 
 Users can access the generic historic information of applications via REST
 APIs.
+
+## <a name="REST_API_ABOUT"></a>About
+
+With the about API, you can get an timeline about resource that contains
+generic history REST API description and version information.
+
+It is essentially a XML/JSON-serialized form of the YARN `TimelineAbout`
+structure.
+
+### URI:
+
+Use the following URI to obtain an timeline about object.
+
+    http(s)://<timeline server http(s) address:port>/ws/v1/applicationhistory/about
+
+### HTTP Operations Supported:
+
+    GET
+
+### Query Parameters Supported:
+
+None
+
+### Elements of the `about` (Application) Object:
+
+| Item         | Data Type   | Description                   |
+|:---- |:----  |:---- |
+| `About` | string  | The description about the service |
+| `timeline-service-version` | string  | The timeline service version |
+| `timeline-service-build-version` | string  | The timeline service build version |
+| `timeline-service-version-built-on` | string  | On what time the timeline service is built |
+| `hadoop-version` | string  | Hadoop version |
+| `hadoop-build-version` | string  | Hadoop build version |
+| `hadoop-version-built-on` | string  | On what time Hadoop is built |
+
+### Response Examples:
+
+#### JSON response
+
+HTTP Request:
+
+    http://localhost:8188/ws/v1/applicationhistory/about
+
+Response Header:
+
+    HTTP/1.1 200 OK
+    Content-Type: application/json
+    Transfer-Encoding: chunked
+
+Response Body:
+
+    {
+      About: "Generic History Service API",
+      timeline-service-version: "3.0.0-SNAPSHOT",
+      timeline-service-build-version: "3.0.0-SNAPSHOT from fcd0702c10ce574b887280476aba63d6682d5271 by zshen source checksum e9ec74ea3ff7bc9f3d35e9cac694fb",
+      timeline-service-version-built-on: "2015-05-13T19:45Z",
+      hadoop-version: "3.0.0-SNAPSHOT",
+      hadoop-build-version: "3.0.0-SNAPSHOT from fcd0702c10ce574b887280476aba63d6682d5271 by zshen source checksum 95874b192923b43cdb96a6e483afd60",
+      hadoop-version-built-on: "2015-05-13T19:44Z"
+    }
+
+#### XML response
+
+HTTP Request:
+
+    GET http://localhost:8188/ws/v1/applicationhistory/about
+    Accept: application/xml
+
+Response Header:
+
+    HTTP/1.1 200 OK
+    Content-Type: application/xml
+    Content-Length: 748
+
+Response Body:
+
+     <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+     <about>
+       <About>Generic History Service API</About>
+       <hadoop-build-version>3.0.0-SNAPSHOT from fcd0702c10ce574b887280476aba63d6682d5271 by zshen source checksum 95874b192923b43cdb96a6e483afd60</hadoop-build-version>
+       <hadoop-version>3.0.0-SNAPSHOT</hadoop-version>
+       <hadoop-version-built-on>2015-05-13T19:44Z</hadoop-version-built-on>
+       <timeline-service-build-version>3.0.0-SNAPSHOT from fcd0702c10ce574b887280476aba63d6682d5271 by zshen source checksum e9ec74ea3ff7bc9f3d35e9cac694fb</timeline-service-build-version>
+       <timeline-service-version>3.0.0-SNAPSHOT</timeline-service-version>
+       <timeline-service-version-built-on>2015-05-13T19:45Z</timeline-service-version-built-on>
+     </about>
 
 ## <a name="REST_API_LIST_APPLICATIONS"></a>Application List
 
@@ -980,7 +1087,12 @@ Response Body:
           "submittedTime":1430425001004,
           "startedTime":1430425001004,
           "finishedTime":1430425008861,
-          "elapsedTime":7857},
+          "elapsedTime":7857,
+          "unmanagedApplication":"false",
+          "applicationPriority":0,
+          "appNodeLabelExpression":"",
+          "amNodeLabelExpression":""
+          },
           {
           "appId":"application_1430424020775_0003",
           "currentAppAttemptId":"appattempt_1430424020775_0003_000001",
@@ -999,7 +1111,12 @@ Response Body:
           "submittedTime":1430424956650,
           "startedTime":1430424956650,
           "finishedTime":1430424963907,
-          "elapsedTime":7257},
+          "elapsedTime":7257,
+          "unmanagedApplication":"false",
+          "applicationPriority":0,
+          "appNodeLabelExpression":"",
+          "amNodeLabelExpression":""
+          },
           {
           "appId":"application_1430424020775_0002",
           "currentAppAttemptId":"appattempt_1430424020775_0002_000001",
@@ -1018,7 +1135,36 @@ Response Body:
           "submittedTime":1430424769395,
           "startedTime":1430424769395,
           "finishedTime":1430424776594,
-          "elapsedTime":7199
+          "elapsedTime":7199,
+          "unmanagedApplication":"false",
+          "applicationPriority":0,
+          "appNodeLabelExpression":"",
+          "amNodeLabelExpression":""
+          },
+          {
+          "appId":"application_1430424020775_0001",
+          "currentAppAttemptId":"appattempt_1430424020775_0001_000001",
+          "user":"zshen",
+          "name":"QuasiMonteCarlo",
+          "queue":"default",
+          "type":"MAPREDUCE",
+          "host":"localhost",
+          "rpcPort":56264,
+          "appState":"FINISHED",
+          "progress":100.0,
+          "diagnosticsInfo":"",
+          "originalTrackingUrl":"http://d-69-91-129-173.dhcp4.washington.edu:19888/jobhistory/job/job_1430424020775_0001",
+          "trackingUrl":"http://d-69-91-129-173.dhcp4.washington.edu:8088/proxy/application_1430424020775_0001/",
+          "finalAppStatus":"SUCCEEDED",
+          "submittedTime":1430424053809,
+          "startedTime":1430424072153,
+          "finishedTime":1430424776594,
+          "elapsedTime":18344,
+          "applicationTags":"mrapplication,ta-example",
+          "unmanagedApplication":"false",
+          "applicationPriority":0,
+          "appNodeLabelExpression":"",
+          "amNodeLabelExpression":""
           }
       ]
     }
@@ -1060,6 +1206,10 @@ Response Body:
         <startedTime>1430425001004</startedTime>
         <finishedTime>1430425008861</finishedTime>
         <elapsedTime>7857</elapsedTime>
+        <unmanagedApplication>false</unmanagedApplication>
+        <applicationPriority>0</applicationPriority>
+        <appNodeLabelExpression></appNodeLabelExpression>
+        <amNodeLabelExpression></amNodeLabelExpression>
       </app>
       <app>
         <appId>application_1430424020775_0003</appId>
@@ -1080,6 +1230,10 @@ Response Body:
         <startedTime>1430424956650</startedTime>
         <finishedTime>1430424963907</finishedTime>
         <elapsedTime>7257</elapsedTime>
+        <unmanagedApplication>false</unmanagedApplication>
+        <applicationPriority>0</applicationPriority>
+        <appNodeLabelExpression></appNodeLabelExpression>
+        <amNodeLabelExpression></amNodeLabelExpression>
       </app>
       <app>
         <appId>application_1430424020775_0002</appId>
@@ -1100,6 +1254,10 @@ Response Body:
         <startedTime>1430424769395</startedTime>
         <finishedTime>1430424776594</finishedTime>
         <elapsedTime>7199</elapsedTime>
+        <unmanagedApplication>false</unmanagedApplication>
+        <applicationPriority>0</applicationPriority>
+        <appNodeLabelExpression></appNodeLabelExpression>
+        <amNodeLabelExpression></amNodeLabelExpression>
       </app>
       <app>
         <appId>application_1430424020775_0001</appId>
@@ -1120,6 +1278,11 @@ Response Body:
         <startedTime>1430424053809</startedTime>
         <finishedTime>1430424072153</finishedTime>
         <elapsedTime>18344</elapsedTime>
+        <applicationTags>mrapplication,ta-example</applicationTags>
+        <unmanagedApplication>false</unmanagedApplication>
+        <applicationPriority>0</applicationPriority>
+        <appNodeLabelExpression></appNodeLabelExpression>
+        <amNodeLabelExpression></amNodeLabelExpression>
       </app>
     </apps>
 
@@ -1129,7 +1292,8 @@ With the Application API, you can get an application resource contains
 information about a particular application that was running on an YARN
 cluster.
 
-It is essentially a JSON-serialized form of the YARN `ApplicationReport` structure.
+It is essentially a XML/JSON-serialized form of the YARN `ApplicationReport`
+structure.
 
 ### URI:
 
@@ -1167,8 +1331,12 @@ None
 | `allocatedVCores` | int | The sum of virtual cores allocated to the application's running containers |
 | `currentAppAttemptId` | string | The latest application attempt ID |
 | `host` | string | The host of the ApplicationMaster |
-| `rpcPort` | int | The RPC port of the ApplicationMaster; zero if no IPC service declared. |
-
+| `rpcPort` | int | The RPC port of the ApplicationMaster; zero if no IPC service declared |
+| `applicationTags` | string | The application tags. |
+| `unmanagedApplication` | boolean | Is the application unmanaged. |
+| `applicationPriority` | int | Priority of the submitted application. |
+| `appNodeLabelExpression` | string |Node Label expression which is used to identify the nodes on which application's containers are expected to run by default.|
+| `amNodeLabelExpression` | string | Node Label expression which is used to identify the node on which application's  AM container is expected to run.|
 ### Response Examples:
 
 #### JSON response
@@ -1203,7 +1371,12 @@ Response Body:
       "submittedTime": 1430424053809,
       "startedTime": 1430424053809,
       "finishedTime": 1430424072153,
-      "elapsedTime": 18344
+      "elapsedTime": 18344,
+      "applicationTags": mrapplication,tag-example,
+      "unmanagedApplication": "false",
+      "applicationPriority": 0,
+      "appNodeLabelExpression": "",
+      "amNodeLabelExpression": ""
     }
 
 #### XML response
@@ -1241,6 +1414,11 @@ Response Body:
        <startedTime>1430424053809</startedTime>
        <finishedTime>1430424072153</finishedTime>
        <elapsedTime>18344</elapsedTime>
+       <applicationTags>mrapplication,ta-example</applicationTags>
+       <unmanagedApplication>false</unmanagedApplication>
+       <applicationPriority>0</applicationPriority>
+       <appNodeLabelExpression><appNodeLabelExpression>
+       <amNodeLabelExpression><amNodeLabelExpression>
      </app>
 
 ## <a name="REST_API_APPLICATION_ATTEMPT_LIST"></a>Application Attempt List
@@ -1451,7 +1629,7 @@ None
 ### Elements of the `containers` (Container List) Object
 
 When you make a request for the list of containers, the information will be
-returned as a collection of container objects. See also {{Container}} for
+returned as a collection of container objects. See also `Container` for
 syntax of the container object.
 
 | Item | Data Type   | Description |

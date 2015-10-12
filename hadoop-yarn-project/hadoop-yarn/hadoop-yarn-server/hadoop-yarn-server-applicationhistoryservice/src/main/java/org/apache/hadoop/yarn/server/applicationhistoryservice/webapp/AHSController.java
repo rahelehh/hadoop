@@ -34,6 +34,10 @@ public class AHSController extends Controller {
     setTitle("Application History");
   }
 
+  public void about() {
+    render(AboutPage.class);
+  }
+
   public void app() {
     render(AppPage.class);
   }

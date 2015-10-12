@@ -21,6 +21,7 @@ package org.apache.hadoop.yarn.server.resourcemanager;
 import static org.mockito.Matchers.isA;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -976,9 +977,10 @@ public class TestRMRestart extends ParameterizedSchedulerTestBase {
     List<ApplicationReport> appList2 = response2.getApplicationList();
     Assert.assertTrue(3 == appList2.size());
 
-    // check application summary is logged for the completed apps after RM restart.
-    verify(rm2.getRMAppManager(), times(3)).logApplicationSummary(
-      isA(ApplicationId.class));
+    // check application summary is logged for the completed apps with timeout
+    // to make sure APP_COMPLETED events are processed, after RM restart.
+    verify(rm2.getRMAppManager(), timeout(1000).times(3)).
+        logApplicationSummary(isA(ApplicationId.class));
   }
 
   private MockAM launchAM(RMApp app, MockRM rm, MockNM nm)
@@ -2166,6 +2168,68 @@ public class TestRMRestart extends ParameterizedSchedulerTestBase {
     Assert.assertTrue(nodeLabels.get(n1).equals(toSet("y")));
     rm1.stop();
     rm2.stop();
+  }
+
+  @Test(timeout = 60000)
+  public void testRMRestartFailAppAttempt() throws Exception {
+    conf.setInt(YarnConfiguration.RM_AM_MAX_ATTEMPTS,
+        YarnConfiguration.DEFAULT_RM_AM_MAX_ATTEMPTS);
+    int maxAttempt =
+        conf.getInt(YarnConfiguration.RM_AM_MAX_ATTEMPTS,
+            YarnConfiguration.DEFAULT_RM_AM_MAX_ATTEMPTS);
+    MemoryRMStateStore memStore = new MemoryRMStateStore();
+    memStore.init(conf);
+    RMState rmState = memStore.getState();
+    Map<ApplicationId, ApplicationStateData> rmAppState =
+        rmState.getApplicationState();
+
+    // start RM
+    MockRM rm1 = createMockRM(conf, memStore);
+    rm1.start();
+    MockNM nm1 =
+        new MockNM("127.0.0.1:1234", 15120, rm1.getResourceTrackerService());
+    nm1.registerNode();
+
+    // create app and launch the AM
+    RMApp app0 = rm1.submitApp(200);
+    MockAM am0 = launchAM(app0, rm1, nm1);
+
+    ApplicationId applicationId = app0.getApplicationId();
+    ApplicationAttemptId appAttemptId1 =
+        app0.getCurrentAppAttempt().getAppAttemptId();
+    Assert.assertEquals(1, appAttemptId1.getAttemptId());
+
+    // fail the 1st app attempt.
+    rm1.failApplicationAttempt(appAttemptId1);
+
+    rm1.waitForState(appAttemptId1, RMAppAttemptState.FAILED);
+    rm1.waitForState(applicationId, RMAppState.ACCEPTED);
+
+    ApplicationAttemptId appAttemptId2 =
+        app0.getCurrentAppAttempt().getAppAttemptId();
+    Assert.assertEquals(2, appAttemptId2.getAttemptId());
+    rm1.waitForState(appAttemptId2, RMAppAttemptState.SCHEDULED);
+
+    // restart rm
+    MockRM rm2 = createMockRM(conf, memStore);
+    rm2.start();
+    RMApp loadedApp0 = rm2.getRMContext().getRMApps().get(applicationId);
+    rm2.waitForState(applicationId, RMAppState.ACCEPTED);
+    rm2.waitForState(am0.getApplicationAttemptId(), RMAppAttemptState.FAILED);
+
+
+    Assert.assertEquals(2, loadedApp0.getAppAttempts().size());
+    rm2.waitForState(appAttemptId2, RMAppAttemptState.SCHEDULED);
+
+    appAttemptId2 = loadedApp0.getCurrentAppAttempt().getAppAttemptId();
+    Assert.assertEquals(2, appAttemptId2.getAttemptId());
+
+    // fail 2nd attempt
+    rm2.failApplicationAttempt(appAttemptId2);
+
+    rm2.waitForState(appAttemptId2, RMAppAttemptState.FAILED);
+    rm2.waitForState(applicationId, RMAppState.FAILED);
+    Assert.assertEquals(maxAttempt, loadedApp0.getAppAttempts().size());
   }
 
   private <E> Set<E> toSet(E... elements) {

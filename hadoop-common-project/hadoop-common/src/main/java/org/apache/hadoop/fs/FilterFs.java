@@ -20,6 +20,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.Collection;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
@@ -396,5 +397,23 @@ public abstract class FilterFs extends AbstractFileSystem {
   public void deleteSnapshot(final Path path, final String snapshotName)
       throws IOException {
     myFs.deleteSnapshot(path, snapshotName);
+  }
+
+  @Override
+  public void setStoragePolicy(Path path, String policyName)
+      throws IOException {
+    myFs.setStoragePolicy(path, policyName);
+  }
+
+  @Override
+  public BlockStoragePolicySpi getStoragePolicy(final Path src)
+      throws IOException {
+    return myFs.getStoragePolicy(src);
+  }
+
+  @Override
+  public Collection<? extends BlockStoragePolicySpi> getAllStoragePolicies()
+      throws IOException {
+    return myFs.getAllStoragePolicies();
   }
 }

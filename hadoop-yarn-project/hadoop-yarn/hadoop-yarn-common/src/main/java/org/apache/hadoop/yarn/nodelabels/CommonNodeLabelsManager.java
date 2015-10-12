@@ -39,6 +39,7 @@ import java.util.regex.Pattern;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.classification.InterfaceAudience.Private;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.service.AbstractService;
 import org.apache.hadoop.yarn.api.records.NodeId;
@@ -59,6 +60,7 @@ import org.apache.hadoop.yarn.util.resource.Resources;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 
+@Private
 public class CommonNodeLabelsManager extends AbstractService {
   protected static final Log LOG = LogFactory.getLog(CommonNodeLabelsManager.class);
   private static final int MAX_LABEL_LENGTH = 255;
@@ -99,7 +101,7 @@ public class CommonNodeLabelsManager extends AbstractService {
   protected NodeLabelsStore store;
   private boolean nodeLabelsEnabled = false;
 
-  private boolean isDistributedNodeLabelConfiguration = false;
+  private boolean isCentralizedNodeLabelConfiguration = true;
 
   /**
    * A <code>Host</code> can have multiple <code>Node</code>s 
@@ -218,20 +220,16 @@ public class CommonNodeLabelsManager extends AbstractService {
         conf.getBoolean(YarnConfiguration.NODE_LABELS_ENABLED,
             YarnConfiguration.DEFAULT_NODE_LABELS_ENABLED);
 
-    isDistributedNodeLabelConfiguration  =
-        YarnConfiguration.isDistributedNodeLabelConfiguration(conf);
+    isCentralizedNodeLabelConfiguration  =
+        YarnConfiguration.isCentralizedNodeLabelConfiguration(conf);
 
-    if (nodeLabelsEnabled) {
-      initNodeLabelStore(conf);
-    }
-    
     labelCollections.put(NO_LABEL, new RMNodeLabel(NO_LABEL));
   }
 
   protected void initNodeLabelStore(Configuration conf) throws Exception {
     this.store = new FileSystemNodeLabelsStore(this);
     this.store.init(conf);
-    this.store.recover(isDistributedNodeLabelConfiguration);
+    this.store.recover(!isCentralizedNodeLabelConfiguration);
   }
 
   // for UT purpose
@@ -243,6 +241,10 @@ public class CommonNodeLabelsManager extends AbstractService {
 
   @Override
   protected void serviceStart() throws Exception {
+    if (nodeLabelsEnabled) {
+      initNodeLabelStore(getConfig());
+    }
+    
     // init dispatcher only when service start, because recover will happen in
     // service init, we don't want to trigger any event handling at that time.
     initDispatcher(getConfig());
@@ -286,7 +288,8 @@ public class CommonNodeLabelsManager extends AbstractService {
     }
     List<NodeLabel> newLabels = new ArrayList<NodeLabel>();
     normalizeNodeLabels(labels);
-
+    // check any mismatch in exclusivity no mismatch with skip
+    checkExclusivityMatch(labels);
     // do a check before actual adding them, will throw exception if any of them
     // doesn't meet label name requirement
     for (NodeLabel label : labels) {
@@ -621,10 +624,14 @@ public class CommonNodeLabelsManager extends AbstractService {
       }
     }
     
-    if (null != dispatcher && !isDistributedNodeLabelConfiguration) {
-      // In case of DistributedNodeLabelConfiguration, no need to save the the
+    if (null != dispatcher && isCentralizedNodeLabelConfiguration) {
+      // In case of DistributedNodeLabelConfiguration or
+      // DelegatedCentralizedNodeLabelConfiguration, no need to save the the
       // NodeLabels Mapping to the back-end store, as on RM restart/failover
       // NodeLabels are collected from NM through Register/Heartbeat again
+      // in case of DistributedNodeLabelConfiguration and collected from
+      // RMNodeLabelsMappingProvider in case of
+      // DelegatedCentralizedNodeLabelConfiguration
       dispatcher.getEventHandler().handle(
           new UpdateNodeToLabelsMappingsEvent(newNMToLabels));
     }
@@ -824,7 +831,7 @@ public class CommonNodeLabelsManager extends AbstractService {
   /**
    * Get mapping of labels info to nodes for specified set of labels.
    *
-   * @param nodelabels
+   * @param labels
    *          set of nodelabels for which labels to nodes mapping will be
    *          returned.
    * @return labels to nodes map
@@ -913,7 +920,7 @@ public class CommonNodeLabelsManager extends AbstractService {
     }
   }
 
-  private void checkAndThrowLabelName(String label) throws IOException {
+  public static void checkAndThrowLabelName(String label) throws IOException {
     if (label == null || label.isEmpty() || label.length() > MAX_LABEL_LENGTH) {
       throw new IOException("label added is empty or exceeds "
           + MAX_LABEL_LENGTH + " character(s)");
@@ -926,6 +933,23 @@ public class CommonNodeLabelsManager extends AbstractService {
       throw new IOException("label name should only contains "
           + "{0-9, a-z, A-Z, -, _} and should not started with {-,_}"
           + ", now it is=" + label);
+    }
+  }
+
+  private void checkExclusivityMatch(Collection<NodeLabel> labels)
+      throws IOException {
+    ArrayList<NodeLabel> mismatchlabels = new ArrayList<NodeLabel>();
+    for (NodeLabel label : labels) {
+      RMNodeLabel rmNodeLabel = this.labelCollections.get(label.getName());
+      if (rmNodeLabel != null
+          && rmNodeLabel.getIsExclusive() != label.isExclusive()) {
+        mismatchlabels.add(label);
+      }
+    }
+    if (mismatchlabels.size() > 0) {
+      throw new IOException(
+          "Exclusivity cannot be modified for an existing label with : "
+              + StringUtils.join(mismatchlabels.iterator(), ","));
     }
   }
 
@@ -991,13 +1015,18 @@ public class CommonNodeLabelsManager extends AbstractService {
     }
   }
   
-  private Set<NodeLabel> getLabelsInfoByNode(NodeId nodeId) {
-    Set<String> labels = getLabelsByNode(nodeId, nodeCollections);
-    if (labels.isEmpty()) {
-      return EMPTY_NODELABEL_SET;
+  public Set<NodeLabel> getLabelsInfoByNode(NodeId nodeId) {
+    try {
+      readLock.lock();
+      Set<String> labels = getLabelsByNode(nodeId, nodeCollections);
+      if (labels.isEmpty()) {
+        return EMPTY_NODELABEL_SET;
+      }
+      Set<NodeLabel> nodeLabels = createNodeLabelFromLabelNames(labels);
+      return nodeLabels;
+    } finally {
+      readLock.unlock();
     }
-    Set<NodeLabel> nodeLabels = createNodeLabelFromLabelNames(labels);
-    return nodeLabels;
   }
 
   private Set<NodeLabel> createNodeLabelFromLabelNames(Set<String> labels) {

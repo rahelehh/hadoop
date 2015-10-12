@@ -63,6 +63,7 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Future;
 
 import org.apache.hadoop.fs.Options;
+import org.apache.hadoop.yarn.server.nodemanager.executor.LocalizerStartContext;
 import org.junit.Assert;
 
 import org.apache.commons.io.FileUtils;
@@ -623,29 +624,31 @@ public class TestResourceLocalizationService {
       // Simulate start of localization for all resources
       privTracker1.getPathForLocalization(privReq1,
           dirsHandler.getLocalPathForWrite(
-              ContainerLocalizer.USERCACHE + user1));
+              ContainerLocalizer.USERCACHE + user1), null);
       privTracker1.getPathForLocalization(privReq2,
           dirsHandler.getLocalPathForWrite(
-              ContainerLocalizer.USERCACHE + user1));
+              ContainerLocalizer.USERCACHE + user1), null);
       LocalizedResource privLr1 = privTracker1.getLocalizedResource(privReq1);
       LocalizedResource privLr2 = privTracker1.getLocalizedResource(privReq2);
       appTracker1.getPathForLocalization(appReq1,
           dirsHandler.getLocalPathForWrite(
-              ContainerLocalizer.APPCACHE + appId1));
+              ContainerLocalizer.APPCACHE + appId1), null);
       LocalizedResource appLr1 = appTracker1.getLocalizedResource(appReq1);
       appTracker2.getPathForLocalization(appReq2,
           dirsHandler.getLocalPathForWrite(
-              ContainerLocalizer.APPCACHE + appId2));
+              ContainerLocalizer.APPCACHE + appId2), null);
       LocalizedResource appLr2 = appTracker2.getLocalizedResource(appReq2);
       appTracker2.getPathForLocalization(appReq3,
           dirsHandler.getLocalPathForWrite(
-              ContainerLocalizer.APPCACHE + appId2));
+              ContainerLocalizer.APPCACHE + appId2), null);
       LocalizedResource appLr3 = appTracker2.getLocalizedResource(appReq3);
       pubTracker.getPathForLocalization(pubReq1,
-          dirsHandler.getLocalPathForWrite(ContainerLocalizer.FILECACHE));
+          dirsHandler.getLocalPathForWrite(ContainerLocalizer.FILECACHE),
+          null);
       LocalizedResource pubLr1 = pubTracker.getLocalizedResource(pubReq1);
       pubTracker.getPathForLocalization(pubReq2,
-          dirsHandler.getLocalPathForWrite(ContainerLocalizer.FILECACHE));
+          dirsHandler.getLocalPathForWrite(ContainerLocalizer.FILECACHE),
+          null);
       LocalizedResource pubLr2 = pubTracker.getLocalizedResource(pubReq2);
 
       // Simulate completion of localization for most resources with
@@ -939,11 +942,16 @@ public class TestResourceLocalizationService {
       dispatcher.await();
       String appStr = ConverterUtils.toString(appId);
       String ctnrStr = c.getContainerId().toString();
-      ArgumentCaptor<Path> tokenPathCaptor = ArgumentCaptor.forClass(Path.class);
-      verify(exec).startLocalizer(tokenPathCaptor.capture(),
-          isA(InetSocketAddress.class), eq("user0"), eq(appStr), eq(ctnrStr),
-          isA(LocalDirsHandlerService.class));
-      Path localizationTokenPath = tokenPathCaptor.getValue();
+      ArgumentCaptor<LocalizerStartContext> contextCaptor = ArgumentCaptor
+          .forClass(LocalizerStartContext.class);
+      verify(exec).startLocalizer(contextCaptor.capture());
+
+      LocalizerStartContext context = contextCaptor.getValue();
+      Path localizationTokenPath = context.getNmPrivateContainerTokens();
+
+      assertEquals("user0", context.getUser());
+      assertEquals(appStr, context.getAppId());
+      assertEquals(ctnrStr, context.getLocId());
 
       // heartbeat from localizer
       LocalResourceStatus rsrc1success = mock(LocalResourceStatus.class);
@@ -2029,7 +2037,7 @@ public class TestResourceLocalizationService {
   }
 
   private static Container getMockContainer(ApplicationId appId, int id,
-      String user) {
+      String user) throws IOException {
     Container c = mock(Container.class);
     ApplicationAttemptId appAttemptId =
         BuilderUtils.newApplicationAttemptId(appId, 1);
@@ -2037,7 +2045,13 @@ public class TestResourceLocalizationService {
     when(c.getUser()).thenReturn(user);
     when(c.getContainerId()).thenReturn(cId);
     Credentials creds = new Credentials();
-    creds.addToken(new Text("tok" + id), getToken(id));
+    Token<? extends TokenIdentifier> tk = getToken(id);
+    String fingerprint = ResourceLocalizationService.buildTokenFingerprint(tk);
+    assertNotNull(fingerprint);
+    assertTrue(
+        "Expected token fingerprint of 10 hex bytes delimited by space.",
+        fingerprint.matches("^(([0-9a-f]){2} ){9}([0-9a-f]){2}$"));
+    creds.addToken(new Text("tok" + id), tk);
     when(c.getCredentials()).thenReturn(creds);
     when(c.toString()).thenReturn(cId.toString());
     return c;

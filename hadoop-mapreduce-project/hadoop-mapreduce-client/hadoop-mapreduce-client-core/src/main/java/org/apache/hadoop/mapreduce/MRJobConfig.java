@@ -71,6 +71,26 @@ public interface MRJobConfig {
 
   public static final String QUEUE_NAME = "mapreduce.job.queuename";
 
+  /**
+   *  Node Label expression applicable for all Job containers.
+   */
+  public static final String JOB_NODE_LABEL_EXP = "mapreduce.job.node-label-expression";
+
+  /**
+   * Node Label expression applicable for AM containers.
+   */
+  public static final String AM_NODE_LABEL_EXP = "mapreduce.job.am.node-label-expression";
+
+  /**
+   *  Node Label expression applicable for map containers.
+   */
+  public static final String MAP_NODE_LABEL_EXP = "mapreduce.map.node-label-expression";
+
+  /**
+   * Node Label expression applicable for reduce containers.
+   */
+  public static final String REDUCE_NODE_LABEL_EXP = "mapreduce.reduce.node-label-expression";
+
   public static final String RESERVATION_ID = "mapreduce.job.reservation.id";
 
   public static final String JOB_TAGS = "mapreduce.job.tags";
@@ -692,10 +712,18 @@ public interface MRJobConfig {
       10 * 1000l;
 
   /**
-   * The threshold in terms of seconds after which an unsatisfied mapper request
-   * triggers reducer preemption to free space. Default 0 implies that the reduces
-   * should be preempted immediately after allocation if there is currently no
-   * room for newly allocated mappers.
+   * Duration to wait before forcibly preempting a reducer to allow
+   * allocating new mappers, even when YARN reports positive headroom.
+   */
+  public static final String MR_JOB_REDUCER_UNCONDITIONAL_PREEMPT_DELAY_SEC =
+      "mapreduce.job.reducer.unconditional-preempt.delay.sec";
+
+  public static final int
+      DEFAULT_MR_JOB_REDUCER_UNCONDITIONAL_PREEMPT_DELAY_SEC = 5 * 60;
+
+  /**
+   * Duration to wait before preempting a reducer, when there is no headroom
+   * to allocate new mappers.
    */
   public static final String MR_JOB_REDUCER_PREEMPT_DELAY_SEC =
       "mapreduce.job.reducer.preempt.delay.sec";

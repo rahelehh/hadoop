@@ -21,6 +21,7 @@ package org.apache.hadoop.fs;
 import java.io.*;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.Collection;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
@@ -202,7 +203,6 @@ public class FilterFileSystem extends FileSystem {
 
 
   @Override
-  @Deprecated
   public FSDataOutputStream createNonRecursive(Path f, FsPermission permission,
       EnumSet<CreateFlag> flags, int bufferSize, short replication, long blockSize,
       Progressable progress) throws IOException {
@@ -618,5 +618,23 @@ public class FilterFileSystem extends FileSystem {
   @Override
   public void removeXAttr(Path path, String name) throws IOException {
     fs.removeXAttr(path, name);
+  }
+
+  @Override
+  public void setStoragePolicy(Path src, String policyName)
+      throws IOException {
+    fs.setStoragePolicy(src, policyName);
+  }
+
+  @Override
+  public BlockStoragePolicySpi getStoragePolicy(final Path src)
+      throws IOException {
+    return fs.getStoragePolicy(src);
+  }
+
+  @Override
+  public Collection<? extends BlockStoragePolicySpi> getAllStoragePolicies()
+      throws IOException {
+    return fs.getAllStoragePolicies();
   }
 }

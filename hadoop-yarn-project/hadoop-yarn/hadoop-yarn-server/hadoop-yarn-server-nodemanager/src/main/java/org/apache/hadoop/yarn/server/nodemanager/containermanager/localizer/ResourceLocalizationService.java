@@ -51,6 +51,7 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.classification.InterfaceAudience.Private;
@@ -124,6 +125,7 @@ import org.apache.hadoop.yarn.server.nodemanager.containermanager.localizer.even
 import org.apache.hadoop.yarn.server.nodemanager.containermanager.localizer.event.ResourceRequestEvent;
 import org.apache.hadoop.yarn.server.nodemanager.containermanager.localizer.security.LocalizerTokenIdentifier;
 import org.apache.hadoop.yarn.server.nodemanager.containermanager.localizer.security.LocalizerTokenSecretManager;
+import org.apache.hadoop.yarn.server.nodemanager.executor.LocalizerStartContext;
 import org.apache.hadoop.yarn.server.nodemanager.recovery.NMStateStoreService;
 import org.apache.hadoop.yarn.server.nodemanager.recovery.NMStateStoreService.LocalResourceTrackerState;
 import org.apache.hadoop.yarn.server.nodemanager.recovery.NMStateStoreService.RecoveredLocalizationState;
@@ -227,7 +229,7 @@ public class ResourceLocalizationService extends CompositeService
   public void serviceInit(Configuration conf) throws Exception {
     this.validateConf(conf);
     this.publicRsrc = new LocalResourcesTrackerImpl(null, null, dispatcher,
-        true, conf, stateStore);
+        true, conf, stateStore, dirsHandler);
     this.recordFactory = RecordFactoryProvider.getRecordFactory(conf);
 
     try {
@@ -828,7 +830,8 @@ public class ResourceLocalizationService extends CompositeService
                     + ContainerLocalizer.FILECACHE,
                   ContainerLocalizer.getEstimatedSize(resource), true);
             Path publicDirDestPath =
-                publicRsrc.getPathForLocalization(key, publicRootPath);
+                publicRsrc.getPathForLocalization(key, publicRootPath,
+                    delService);
             if (!publicDirDestPath.getParent().equals(publicRootPath)) {
               DiskChecker.checkDir(new File(publicDirDestPath.toUri().getPath()));
             }
@@ -1114,7 +1117,7 @@ public class ResourceLocalizationService extends CompositeService
           dirsHandler.getLocalPathForWrite(cacheDirectory,
             ContainerLocalizer.getEstimatedSize(rsrc), false);
       return tracker.getPathForLocalization(new LocalResourceRequest(rsrc),
-          dirPath);
+          dirPath, delService);
     }
 
     @Override
@@ -1135,13 +1138,15 @@ public class ResourceLocalizationService extends CompositeService
         writeCredentials(nmPrivateCTokensPath);
         // 2) exec initApplication and wait
         if (dirsHandler.areDisksHealthy()) {
-          exec.startLocalizer(nmPrivateCTokensPath, localizationServerAddress,
-              context.getUser(),
-              ConverterUtils.toString(
-                  context.getContainerId().
-                  getApplicationAttemptId().getApplicationId()),
-              localizerId,
-              dirsHandler);
+          exec.startLocalizer(new LocalizerStartContext.Builder()
+              .setNmPrivateContainerTokens(nmPrivateCTokensPath)
+              .setNmAddr(localizationServerAddress)
+              .setUser(context.getUser())
+              .setAppId(ConverterUtils.toString(context.getContainerId()
+                  .getApplicationAttemptId().getApplicationId()))
+              .setLocId(localizerId)
+              .setDirsHandler(dirsHandler)
+              .build());
         } else {
           throw new IOException("All disks failed. "
               + dirsHandler.getDisksHealthReport(false));
@@ -1205,7 +1210,7 @@ public class ResourceLocalizationService extends CompositeService
         if (LOG.isDebugEnabled()) {
           for (Token<? extends TokenIdentifier> tk : credentials
               .getAllTokens()) {
-            LOG.debug(tk.getService() + " : " + tk.encodeToUrlString());
+            LOG.debug(tk + " : " + buildTokenFingerprint(tk));
           }
         }
         if (UserGroupInformation.isSecurityEnabled()) {
@@ -1223,6 +1228,32 @@ public class ResourceLocalizationService extends CompositeService
       }
     }
 
+  }
+
+  /**
+   * Returns a fingerprint of a token.  The fingerprint is suitable for use in
+   * logging, because it cannot be used to determine the secret.  The
+   * fingerprint is built using the first 10 bytes of a SHA-256 hash of the
+   * string encoding of the token.  The returned string contains the hex
+   * representation of each byte, delimited by a space.
+   *
+   * @param tk token
+   * @return token fingerprint
+   * @throws IOException if there is an I/O error
+   */
+  @VisibleForTesting
+  static String buildTokenFingerprint(Token<? extends TokenIdentifier> tk)
+      throws IOException {
+    char[] digest = DigestUtils.sha256Hex(tk.encodeToUrlString()).toCharArray();
+    StringBuilder fingerprint = new StringBuilder();
+    for (int i = 0; i < 10; ++i) {
+      if (i > 0) {
+        fingerprint.append(' ');
+      }
+      fingerprint.append(digest[2 * i]);
+      fingerprint.append(digest[2 * i + 1]);
+    }
+    return fingerprint.toString();
   }
 
   static class CacheCleanup extends Thread {
@@ -1310,7 +1341,7 @@ public class ResourceLocalizationService extends CompositeService
   }
 
   private void cleanUpLocalDirs(FileContext lfs, DeletionService del) {
-    for (String localDir : dirsHandler.getLocalDirs()) {
+    for (String localDir : dirsHandler.getLocalDirsForCleanup()) {
       cleanUpLocalDir(lfs, del, localDir);
     }
   }

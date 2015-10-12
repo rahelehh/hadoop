@@ -25,6 +25,7 @@ import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.hadoop.classification.InterfaceAudience;
+import org.apache.hadoop.fs.BlockStoragePolicySpi;
 import org.apache.hadoop.fs.StorageType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,7 +35,7 @@ import org.slf4j.LoggerFactory;
  * for the replicas of a block.
  */
 @InterfaceAudience.Private
-public class BlockStoragePolicy {
+public class BlockStoragePolicy implements BlockStoragePolicySpi {
   public static final Logger LOG = LoggerFactory.getLogger(BlockStoragePolicy
       .class);
 
@@ -78,7 +79,7 @@ public class BlockStoragePolicy {
    * @return a list of {@link StorageType}s for storing the replicas of a block.
    */
   public List<StorageType> chooseStorageTypes(final short replication) {
-    final List<StorageType> types = new LinkedList<StorageType>();
+    final List<StorageType> types = new LinkedList<>();
     int i = 0, j = 0;
 
     // Do not return transient storage types. We will not have accurate
@@ -135,11 +136,11 @@ public class BlockStoragePolicy {
       final Iterable<StorageType> chosen,
       final EnumSet<StorageType> unavailables,
       final boolean isNewBlock) {
-    final List<StorageType> excess = new LinkedList<StorageType>();
+    final List<StorageType> excess = new LinkedList<>();
     final List<StorageType> storageTypes = chooseStorageTypes(
         replication, chosen, excess);
     final int expectedSize = storageTypes.size() - excess.size();
-    final List<StorageType> removed = new LinkedList<StorageType>();
+    final List<StorageType> removed = new LinkedList<>();
     for(int i = storageTypes.size() - 1; i >= 0; i--) {
       // replace/remove unavailable storage types.
       final StorageType t = storageTypes.get(i);
@@ -157,13 +158,11 @@ public class BlockStoragePolicy {
     // remove excess storage types after fallback replacement.
     diff(storageTypes, excess, null);
     if (storageTypes.size() < expectedSize) {
-      LOG.warn("Failed to place enough replicas: expected size is " + expectedSize
-          + " but only " + storageTypes.size() + " storage types can be selected "
-          + "(replication=" + replication
-          + ", selected=" + storageTypes
-          + ", unavailable=" + unavailables
-          + ", removed=" + removed
-          + ", policy=" + this + ")");
+      LOG.warn("Failed to place enough replicas: expected size is {}"
+          + " but only {} storage types can be selected (replication={},"
+          + " selected={}, unavailable={}" + ", removed={}" + ", policy={}"
+          + ")", expectedSize, storageTypes.size(), replication, storageTypes,
+          unavailables, removed, this);
     }
     return storageTypes;
   }
@@ -196,7 +195,7 @@ public class BlockStoragePolicy {
   public List<StorageType> chooseExcess(final short replication,
       final Iterable<StorageType> chosen) {
     final List<StorageType> types = chooseStorageTypes(replication);
-    final List<StorageType> excess = new LinkedList<StorageType>();
+    final List<StorageType> excess = new LinkedList<>();
     diff(types, chosen, excess);
     return excess;
   }
@@ -239,18 +238,22 @@ public class BlockStoragePolicy {
     return id;
   }
 
+  @Override
   public String getName() {
     return name;
   }
 
+  @Override
   public StorageType[] getStorageTypes() {
     return this.storageTypes;
   }
 
+  @Override
   public StorageType[] getCreationFallbacks() {
     return this.creationFallbacks;
   }
 
+  @Override
   public StorageType[] getReplicationFallbacks() {
     return this.replicationFallbacks;
   }
@@ -265,6 +268,7 @@ public class BlockStoragePolicy {
     return null;
   }
 
+  @Override
   public boolean isCopyOnCreateFile() {
     return copyOnCreateFile;
   }

@@ -17,6 +17,7 @@
  */
 package org.apache.hadoop.hdfs.server.namenode.snapshot;
 
+import static org.apache.hadoop.hdfs.server.namenode.INodeId.INVALID_INODE_ID;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -42,7 +43,7 @@ import org.apache.hadoop.hdfs.MiniDFSCluster;
 import org.apache.hadoop.hdfs.MiniDFSNNTopology;
 import org.apache.hadoop.hdfs.protocol.HdfsConstants;
 import org.apache.hadoop.hdfs.protocol.HdfsConstants.SafeModeAction;
-import org.apache.hadoop.hdfs.server.blockmanagement.BlockInfoContiguous;
+import org.apache.hadoop.hdfs.server.blockmanagement.BlockInfo;
 import org.apache.hadoop.hdfs.server.blockmanagement.BlockManager;
 import org.apache.hadoop.hdfs.server.namenode.FSDirectory;
 import org.apache.hadoop.hdfs.server.namenode.FSNamesystem;
@@ -262,13 +263,13 @@ public class TestSnapshotDeletion {
     DFSTestUtil.createFile(hdfs, tempFile, BLOCKSIZE, REPLICATION, seed);
     final INodeFile temp = TestSnapshotBlocksMap.assertBlockCollection(
         tempFile.toString(), 1, fsdir, blockmanager);
-    BlockInfoContiguous[] blocks = temp.getBlocks();
+    BlockInfo[] blocks = temp.getBlocks();
     hdfs.delete(tempDir, true);
     // check dir's quota usage
     checkQuotaUsageComputation(dir, 8, BLOCKSIZE * REPLICATION * 3);
     // check blocks of tempFile
-    for (BlockInfoContiguous b : blocks) {
-      assertNull(blockmanager.getBlockCollection(b));
+    for (BlockInfo b : blocks) {
+      assertEquals(INVALID_INODE_ID, b.getBlockCollectionId());
     }
     
     // make a change: create a new file under subsub
@@ -344,8 +345,8 @@ public class TestSnapshotDeletion {
     // while deletion, we add diff for subsub and metaChangeFile1, and remove
     // newFile
     checkQuotaUsageComputation(dir, 9L, BLOCKSIZE * REPLICATION * 4);
-    for (BlockInfoContiguous b : blocks) {
-      assertNull(blockmanager.getBlockCollection(b));
+    for (BlockInfo b : blocks) {
+      assertEquals(INVALID_INODE_ID, b.getBlockCollectionId());
     }
     
     // make sure the whole subtree of sub is stored correctly in snapshot
@@ -481,7 +482,7 @@ public class TestSnapshotDeletion {
     
     final INodeFile toDeleteFileNode = TestSnapshotBlocksMap
         .assertBlockCollection(toDeleteFile.toString(), 1, fsdir, blockmanager);
-    BlockInfoContiguous[] blocks = toDeleteFileNode.getBlocks();
+    BlockInfo[] blocks = toDeleteFileNode.getBlocks();
     
     // create snapshot s0 on dir
     SnapshotTestHelper.createSnapshot(hdfs, dir, "s0");
@@ -507,8 +508,8 @@ public class TestSnapshotDeletion {
     // metaChangeDir's diff, dir's diff. diskspace: remove toDeleteFile, and 
     // metaChangeFile's replication factor decreases
     checkQuotaUsageComputation(dir, 6, 2 * BLOCKSIZE * REPLICATION - BLOCKSIZE);
-    for (BlockInfoContiguous b : blocks) {
-      assertNull(blockmanager.getBlockCollection(b));
+    for (BlockInfo b : blocks) {
+      assertEquals(INVALID_INODE_ID, b.getBlockCollectionId());
     }
     
     // check 1. there is no snapshot s0
@@ -782,7 +783,7 @@ public class TestSnapshotDeletion {
     // modify file10, to check if the posterior diff was set correctly
     hdfs.setReplication(file10, REPLICATION);
     checkQuotaUsageComputation(snapshotRoot, dirNodeNum + 7, 20 * BLOCKSIZE);
-    
+
     Path file10_s1 = SnapshotTestHelper.getSnapshotPath(snapshotRoot, "s1",
         modDirStr + "file10");
     Path file11_s1 = SnapshotTestHelper.getSnapshotPath(snapshotRoot, "s1",
@@ -801,7 +802,7 @@ public class TestSnapshotDeletion {
     FileStatus statusBeforeDeletion13 = hdfs.getFileStatus(file13_s1);
     INodeFile file14Node = TestSnapshotBlocksMap.assertBlockCollection(
         file14_s2.toString(), 1, fsdir, blockmanager);
-    BlockInfoContiguous[] blocks_14 = file14Node.getBlocks();
+    BlockInfo[] blocks_14 = file14Node.getBlocks();
     TestSnapshotBlocksMap.assertBlockCollection(file15_s2.toString(), 1, fsdir,
         blockmanager);
     
@@ -830,7 +831,7 @@ public class TestSnapshotDeletion {
         blockmanager);
     TestSnapshotBlocksMap.assertBlockCollection(file13_s1.toString(), 1, fsdir,
         blockmanager);
-    
+
     // make sure file14 and file15 are not included in s1
     Path file14_s1 = SnapshotTestHelper.getSnapshotPath(snapshotRoot, "s1",
         modDirStr + "file14");
@@ -838,17 +839,21 @@ public class TestSnapshotDeletion {
         modDirStr + "file15");
     assertFalse(hdfs.exists(file14_s1));
     assertFalse(hdfs.exists(file15_s1));
-    for (BlockInfoContiguous b : blocks_14) {
-      assertNull(blockmanager.getBlockCollection(b));
+    for (BlockInfo b : blocks_14) {
+      assertEquals(INVALID_INODE_ID, b.getBlockCollectionId());
     }
-    
+
     INodeFile nodeFile13 = (INodeFile) fsdir.getINode(file13.toString());
-    assertEquals(REPLICATION_1, nodeFile13.getPreferredBlockReplication());
+    for (BlockInfo b: nodeFile13.getBlocks()) {
+      assertEquals(REPLICATION_1, b.getReplication());
+    }
     TestSnapshotBlocksMap.assertBlockCollection(file13.toString(), 1, fsdir,
         blockmanager);
-    
+
     INodeFile nodeFile12 = (INodeFile) fsdir.getINode(file12_s1.toString());
-    assertEquals(REPLICATION_1, nodeFile12.getPreferredBlockReplication());
+    for (BlockInfo b: nodeFile12.getBlocks()) {
+      assertEquals(REPLICATION_1, b.getReplication());
+    }
   }
   
   /** Test deleting snapshots with modification on the metadata of directory */ 

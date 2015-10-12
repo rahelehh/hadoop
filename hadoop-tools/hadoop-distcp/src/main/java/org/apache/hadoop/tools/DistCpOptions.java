@@ -47,7 +47,7 @@ public class DistCpOptions {
   public static final int maxNumListstatusThreads = 40;
   private int numListstatusThreads = 0;  // Indicates that flag is not set.
   private int maxMaps = DistCpConstants.DEFAULT_MAPS;
-  private int mapBandwidth = DistCpConstants.DEFAULT_BANDWIDTH_MB;
+  private float mapBandwidth = DistCpConstants.DEFAULT_BANDWIDTH_MB;
 
   private String sslConfigurationFile;
 
@@ -69,7 +69,12 @@ public class DistCpOptions {
 
   private Path targetPath;
 
-  // targetPathExist is a derived field, it's initialized in the 
+  /**
+   * The path to a file containing a list of paths to filter out of the copy.
+   */
+  private String filtersFile;
+
+  // targetPathExist is a derived field, it's initialized in the
   // beginning of distcp.
   private boolean targetPathExists = true;
   
@@ -139,6 +144,7 @@ public class DistCpOptions {
       this.sourcePaths = that.getSourcePaths();
       this.targetPath = that.getTargetPath();
       this.targetPathExists = that.getTargetPathExists();
+      this.filtersFile = that.getFiltersFile();
     }
   }
 
@@ -360,7 +366,7 @@ public class DistCpOptions {
    *
    * @return Bandwidth in MB
    */
-  public int getMapBandwidth() {
+  public float getMapBandwidth() {
     return mapBandwidth;
   }
 
@@ -369,7 +375,7 @@ public class DistCpOptions {
    *
    * @param mapBandwidth - per map bandwidth
    */
-  public void setMapBandwidth(int mapBandwidth) {
+  public void setMapBandwidth(float mapBandwidth) {
     assert mapBandwidth > 0 : "Bandwidth " + mapBandwidth + " is invalid (should be > 0)";
     this.mapBandwidth = mapBandwidth;
   }
@@ -549,6 +555,23 @@ public class DistCpOptions {
     return this.targetPathExists = targetPathExists;
   }
 
+  /**
+   * File path that contains the list of patterns
+   * for paths to be filtered from the file copy.
+   * @return - Filter  file path.
+   */
+  public final String getFiltersFile() {
+    return filtersFile;
+  }
+
+  /**
+   * Set filtersFile.
+   * @param filtersFilename The path to a list of patterns to exclude from copy.
+   */
+  public final void setFiltersFile(String filtersFilename) {
+    this.filtersFile = filtersFilename;
+  }
+
   public void validate(DistCpOptionSwitch option, boolean value) {
 
     boolean syncFolder = (option == DistCpOptionSwitch.SYNC_FOLDERS ?
@@ -591,9 +614,9 @@ public class DistCpOptions {
       throw new IllegalArgumentException(
           "Append is disallowed when skipping CRC");
     }
-    if ((!syncFolder || !deleteMissing) && useDiff) {
+    if ((!syncFolder || deleteMissing) && useDiff) {
       throw new IllegalArgumentException(
-          "Diff is valid only with update and delete options");
+          "Diff is valid only with update options");
     }
   }
 
@@ -623,6 +646,10 @@ public class DistCpOptions {
         String.valueOf(mapBandwidth));
     DistCpOptionSwitch.addToConf(conf, DistCpOptionSwitch.PRESERVE_STATUS,
         DistCpUtils.packAttributes(preserveStatus));
+    if (filtersFile != null) {
+      DistCpOptionSwitch.addToConf(conf, DistCpOptionSwitch.FILTERS,
+          filtersFile);
+    }
   }
 
   /**
@@ -645,6 +672,7 @@ public class DistCpOptions {
         ", targetPath=" + targetPath +
         ", targetPathExists=" + targetPathExists +
         ", preserveRawXattrs=" + preserveRawXattrs +
+        ", filtersFile='" + filtersFile + '\'' +
         '}';
   }
 

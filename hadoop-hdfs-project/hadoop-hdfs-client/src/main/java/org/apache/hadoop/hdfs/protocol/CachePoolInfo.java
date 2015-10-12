@@ -24,8 +24,6 @@ import javax.annotation.Nullable;
 
 import org.apache.commons.lang.builder.EqualsBuilder;
 import org.apache.commons.lang.builder.HashCodeBuilder;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.fs.InvalidRequestException;
@@ -41,7 +39,6 @@ import org.apache.hadoop.hdfs.protocol.CacheDirectiveInfo.Expiration;
 @InterfaceAudience.Public
 @InterfaceStability.Evolving
 public class CachePoolInfo {
-  public static final Log LOG = LogFactory.getLog(CachePoolInfo.class);
 
   /**
    * Indicates that the pool does not have a maximum relative expiry.
@@ -148,7 +145,7 @@ public class CachePoolInfo {
   /**
    * Set the maximum relative expiration of directives of this pool in
    * milliseconds.
-   * 
+   *
    * @param ms in milliseconds
    * @return This builder, for call chaining.
    */
@@ -158,17 +155,15 @@ public class CachePoolInfo {
   }
 
   public String toString() {
-    return new StringBuilder().append("{").
-      append("poolName:").append(poolName).
-      append(", ownerName:").append(ownerName).
-      append(", groupName:").append(groupName).
-      append(", mode:").append((mode == null) ? "null" :
-          String.format("0%03o", mode.toShort())).
-      append(", limit:").append(limit).
-      append(", maxRelativeExpiryMs:").append(maxRelativeExpiryMs).
-      append("}").toString();
+    return "{" + "poolName:" + poolName
+        + ", ownerName:" + ownerName
+        + ", groupName:" + groupName
+        + ", mode:"
+        + ((mode == null) ? "null" : String.format("0%03o", mode.toShort()))
+        + ", limit:" + limit
+        + ", maxRelativeExpiryMs:" + maxRelativeExpiryMs + "}";
   }
-  
+
   @Override
   public boolean equals(Object o) {
     if (o == null) { return false; }

@@ -55,6 +55,7 @@ import org.apache.hadoop.hdfs.server.namenode.FsImageProto.StringTableSection;
 import org.apache.hadoop.hdfs.server.namenode.snapshot.FSImageFormatPBSnapshot;
 import org.apache.hadoop.hdfs.server.namenode.startupprogress.Phase;
 import org.apache.hadoop.hdfs.server.namenode.startupprogress.StartupProgress;
+import org.apache.hadoop.hdfs.server.namenode.startupprogress.StartupProgress.Counter;
 import org.apache.hadoop.hdfs.server.namenode.startupprogress.Step;
 import org.apache.hadoop.hdfs.server.namenode.startupprogress.StepType;
 import org.apache.hadoop.hdfs.util.MD5FileUtils;
@@ -250,7 +251,7 @@ public final class FSImageFormatProtobuf {
         case INODE: {
           currentStep = new Step(StepType.INODES);
           prog.beginStep(Phase.LOADING_FSIMAGE, currentStep);
-          inodeLoader.loadINodeSection(in);
+          inodeLoader.loadINodeSection(in, prog, currentStep);
         }
           break;
         case INODE_REFERENCE:
@@ -272,14 +273,14 @@ public final class FSImageFormatProtobuf {
           prog.endStep(Phase.LOADING_FSIMAGE, currentStep);
           Step step = new Step(StepType.DELEGATION_TOKENS);
           prog.beginStep(Phase.LOADING_FSIMAGE, step);
-          loadSecretManagerSection(in);
+          loadSecretManagerSection(in, prog, step);
           prog.endStep(Phase.LOADING_FSIMAGE, step);
         }
           break;
         case CACHE_MANAGER: {
           Step step = new Step(StepType.CACHE_POOLS);
           prog.beginStep(Phase.LOADING_FSIMAGE, step);
-          loadCacheManagerSection(in);
+          loadCacheManagerSection(in, prog, step);
           prog.endStep(Phase.LOADING_FSIMAGE, step);
         }
           break;
@@ -296,7 +297,11 @@ public final class FSImageFormatProtobuf {
       blockIdManager.setGenerationStampV1(s.getGenstampV1());
       blockIdManager.setGenerationStampV2(s.getGenstampV2());
       blockIdManager.setGenerationStampV1Limit(s.getGenstampV1Limit());
-      blockIdManager.setLastAllocatedBlockId(s.getLastAllocatedBlockId());
+      blockIdManager.setLastAllocatedContiguousBlockId(s.getLastAllocatedBlockId());
+      if (s.hasLastAllocatedStripedBlockId()) {
+        blockIdManager.setLastAllocatedStripedBlockId(
+            s.getLastAllocatedStripedBlockId());
+      }
       imgTxId = s.getTransactionId();
       if (s.hasRollingUpgradeStartTime()
           && fsn.getFSImage().hasRollbackFSImage()) {
@@ -316,7 +321,8 @@ public final class FSImageFormatProtobuf {
       }
     }
 
-    private void loadSecretManagerSection(InputStream in) throws IOException {
+    private void loadSecretManagerSection(InputStream in, StartupProgress prog,
+        Step currentStep) throws IOException {
       SecretManagerSection s = SecretManagerSection.parseDelimitedFrom(in);
       int numKeys = s.getNumKeys(), numTokens = s.getNumTokens();
       ArrayList<SecretManagerSection.DelegationKey> keys = Lists
@@ -327,20 +333,30 @@ public final class FSImageFormatProtobuf {
       for (int i = 0; i < numKeys; ++i)
         keys.add(SecretManagerSection.DelegationKey.parseDelimitedFrom(in));
 
-      for (int i = 0; i < numTokens; ++i)
+      prog.setTotal(Phase.LOADING_FSIMAGE, currentStep, numTokens);
+      Counter counter = prog.getCounter(Phase.LOADING_FSIMAGE, currentStep);
+      for (int i = 0; i < numTokens; ++i) {
         tokens.add(SecretManagerSection.PersistToken.parseDelimitedFrom(in));
+        counter.increment();
+      }
 
       fsn.loadSecretManagerState(s, keys, tokens);
     }
 
-    private void loadCacheManagerSection(InputStream in) throws IOException {
+    private void loadCacheManagerSection(InputStream in, StartupProgress prog,
+        Step currentStep) throws IOException {
       CacheManagerSection s = CacheManagerSection.parseDelimitedFrom(in);
-      ArrayList<CachePoolInfoProto> pools = Lists.newArrayListWithCapacity(s
-          .getNumPools());
+      int numPools = s.getNumPools();
+      ArrayList<CachePoolInfoProto> pools = Lists
+          .newArrayListWithCapacity(numPools);
       ArrayList<CacheDirectiveInfoProto> directives = Lists
           .newArrayListWithCapacity(s.getNumDirectives());
-      for (int i = 0; i < s.getNumPools(); ++i)
+      prog.setTotal(Phase.LOADING_FSIMAGE, currentStep, numPools);
+      Counter counter = prog.getCounter(Phase.LOADING_FSIMAGE, currentStep);
+      for (int i = 0; i < numPools; ++i) {
         pools.add(CachePoolInfoProto.parseDelimitedFrom(in));
+        counter.increment();
+      }
       for (int i = 0; i < s.getNumDirectives(); ++i)
         directives.add(CacheDirectiveInfoProto.parseDelimitedFrom(in));
       fsn.getCacheManager().loadState(
@@ -453,7 +469,8 @@ public final class FSImageFormatProtobuf {
 
       FileSummary.Builder b = FileSummary.newBuilder()
           .setOndiskVersion(FSImageUtil.FILE_VERSION)
-          .setLayoutVersion(NameNodeLayoutVersion.CURRENT_LAYOUT_VERSION);
+          .setLayoutVersion(
+              context.getSourceNamesystem().getEffectiveLayoutVersion());
 
       codec = compression.getImageCodec();
       if (codec != null) {
@@ -536,7 +553,8 @@ public final class FSImageFormatProtobuf {
           .setGenstampV1(blockIdManager.getGenerationStampV1())
           .setGenstampV1Limit(blockIdManager.getGenerationStampV1Limit())
           .setGenstampV2(blockIdManager.getGenerationStampV2())
-          .setLastAllocatedBlockId(blockIdManager.getLastAllocatedBlockId())
+          .setLastAllocatedBlockId(blockIdManager.getLastAllocatedContiguousBlockId())
+          .setLastAllocatedStripedBlockId(blockIdManager.getLastAllocatedStripedBlockId())
           .setTransactionId(context.getTxId());
 
       // We use the non-locked version of getNamespaceInfo here since
